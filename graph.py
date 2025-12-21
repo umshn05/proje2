@@ -122,7 +122,6 @@ class Graph:
                 g.add_node(node)
 
         # Sonra komşuluklara göre edge ekle
-        from dinamikAgırlık import calculate_weight  # weight_func istersen bunu kullanır
 
         for row in rows:
             a_id = int(row["DugumId"])
