@@ -1,6 +1,6 @@
 # backend_test_alg.py
 from graph import Graph, Node
-from dinamikAgırlık import calculate_weight
+from dinamik_agirlik import calculate_weight
 from algoritma import (
     bfs, dfs, dijkstra, reconstruct_path,
     connected_components, degree_centrality, welsh_powell
@@ -44,7 +44,7 @@ g.to_csv("test_graf.csv")
 print("\nGraf test_graf.csv dosyasına kaydedildi.")
 
     # CSV'den tekrar yükle (kontrol)
-from dinamikAgırlık import calculate_weight
+from dinamik_agirlik import calculate_weight
 from graph import Graph
 g2 = Graph.from_csv("test_graf.csv", calculate_weight)
 print("CSV'den yüklenen graf - node sayısı:", len(g2.nodes))
