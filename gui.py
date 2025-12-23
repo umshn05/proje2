@@ -15,7 +15,7 @@ class GraphApp(tk.Tk):
         super().__init__()
 
         self.title("Sosyal Ağ Analizi - GUI")
-        self.geometry("900x600")
+        self.geometry("1200x650")
         # === Canvas için yardımcı yapılar ===
         self.node_positions = {}   # node_id -> (x, y)
         self.node_items = {}       # node_id -> canvas circle id
@@ -157,18 +157,42 @@ class GraphApp(tk.Tk):
             node_frame, text="Düğüm Güncelle", command=self.update_node_dialog
         )
         self.btn_update_node.pack(side="left", padx=5)
+        
+        # === KENAR (EDGE) İŞLEMLERİ ===
+        self.btn_add_edge = ttk.Button(
+            node_frame, text="Kenar Ekle", command=self.add_edge_dialog
+        )
+        self.btn_add_edge.pack(side="left", padx=5)
+
+        self.btn_delete_edge = ttk.Button(
+            node_frame, text="Kenar Sil", command=self.delete_edge_dialog
+        )
+        self.btn_delete_edge.pack(side="left", padx=5)
 
 
 
 
-        # === GRAFİK ÇİZİM ALANI (Canvas) ===
-        self.canvas = tk.Canvas(self, bg="white", height=300)
-        self.canvas.pack(fill="x", padx=10, pady=(10, 5))
 
+        # === ANA GÖRÜNÜM: Canvas solda, sonuçlar sağda ===
+        main_pane = tk.PanedWindow(self, orient="horizontal")
+        main_pane.pack(fill="both", expand=True, padx=10, pady=(10, 10))
 
-        # Alt kısım: sonuçların yazıldığı metin alanı
-        self.output = tk.Text(self, wrap="word")
-        self.output.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        # Sol taraf: canvas
+        left_frame = ttk.Frame(main_pane)
+        main_pane.add(left_frame, minsize=450)  # minimum genişlik
+
+        # Sağ taraf: sonuç text alanı
+        right_frame = ttk.Frame(main_pane)
+        main_pane.add(right_frame, minsize=300)
+
+        # Canvas
+        self.canvas = tk.Canvas(left_frame, bg="white")
+        self.canvas.pack(fill="both", expand=True)
+
+        # Sonuçların yazıldığı metin alanı
+        self.output = tk.Text(right_frame, wrap="word")
+        self.output.pack(fill="both", expand=True)
+
 
         # Başlangıçta graf bilgilerini yaz
         self.output.insert("end", "Graf yüklendi.\n\nDüğümler:\n")
@@ -186,6 +210,23 @@ class GraphApp(tk.Tk):
         adj = self.graph.adjacency_list()
         for nid in sorted(adj):
             self.output.insert("end", f"{nid}: {adj[nid]}\n")
+
+    def refresh_degrees(self):
+        """Adjacency list'e göre tüm düğümlerin degree değerlerini günceller."""
+        if not self.graph or not self.graph.nodes:
+            return
+
+        for nid, node in self.graph.nodes.items():
+            try:
+                neighbors = self.graph.neighbors(nid)
+                node.degree = len(neighbors)
+            except Exception:
+                # Eğer neighbors fonksiyonu yoksa adjacency'den hesaplarız
+                if nid in self.graph.adj:
+                    node.degree = len(self.graph.adj[nid])
+                else:
+                    node.degree = 0
+        
      
     def draw_graph(self):
         """self.graph içindeki node ve edge'leri canvas üzerinde çizer."""
@@ -199,38 +240,58 @@ class GraphApp(tk.Tk):
         if not self.graph or not self.graph.nodes:
             return
 
+        # İstersen degree'leri de burada güncelle
+        try:
+            self.refresh_degrees()
+        except AttributeError:
+            pass
+
         nodes = list(self.graph.nodes.values())
         n = len(nodes)
         if n == 0:
             return
 
-        # Düğümleri daire şeklinde yerleştirelim
-        cx, cy = 450, 150   # çemberin merkezi
-        radius = 140        # çember yarıçapı
-        r = 20              # düğüm dairesi yarıçapı
+        # === DÜĞÜM POZİSYONLARI: GRID (TABLO) DÜZENİ ===
+        # Yuvarlak yerine 6 sütunlu bir tabloya yerleştirelim
+        cols = 6
+        spacing_x = 120
+        spacing_y = 90
+        start_x = 80
+        start_y = 80
 
-        # Node id -> (x, y) konumlarını hesapla
-        for i, node in enumerate(nodes):
-            angle = 2 * math.pi * i / n
-            x = cx + radius * math.cos(angle)
-            y = cy + radius * math.sin(angle)
+        for idx, node in enumerate(nodes):
+            row = idx // cols
+            col = idx % cols
+            x = start_x + col * spacing_x
+            y = start_y + row * spacing_y
             self.node_positions[node.id] = (x, y)
 
-        # Önce kenarları çiz (aynı kenarı iki kere çizmemek için set kullanıyoruz)
+        # === KENARLARI ÇİZ ===
+        # Burada self.graph.adj yerine adjacency_list() kullanıyoruz.
+        # Böylece backend'de adjacency nasıl tutulursa tutulsun,
+        # komşuluk listesinden çizim yapıyoruz.
+        try:
+            adj = self.graph.adjacency_list()
+        except Exception:
+            adj = {}
+
         drawn_edges = set()
-        for a_id, edges in self.graph.adj.items():
+        for a_id, neighbors in adj.items():
             x1, y1 = self.node_positions.get(a_id, (0, 0))
-            for e in edges:
-                key = tuple(sorted((e.from_id, e.to_id)))
+            for b_id in neighbors:
+                key = tuple(sorted((a_id, b_id)))
                 if key in drawn_edges:
                     continue
                 drawn_edges.add(key)
 
-                x2, y2 = self.node_positions.get(e.to_id, (0, 0))
-                line_id = self.canvas.create_line(x1, y1, x2, y2, width=2, fill="gray")
+                x2, y2 = self.node_positions.get(b_id, (0, 0))
+                line_id = self.canvas.create_line(
+                    x1, y1, x2, y2, width=2, fill="gray"
+                )
                 self.edge_items.append(line_id)
 
-        # Sonra düğümleri çiz (oval + id yazısı)
+        # === DÜĞÜMLERİ ÇİZ (OVAL + ID YAZISI) ===
+        r = 20  # düğüm dairesi yarıçapı
         for node in nodes:
             x, y = self.node_positions[node.id]
             oval_id = self.canvas.create_oval(
@@ -253,6 +314,7 @@ class GraphApp(tk.Tk):
                 "<Button-1>",
                 lambda event, nid=node.id: self.on_node_click(nid)
             )
+
     def add_node_dialog(self):
         """Kullanıcıdan yeni düğüm bilgilerini alıp grafa ekler."""
         if not self.graph:
@@ -460,6 +522,182 @@ class GraphApp(tk.Tk):
             f"name={name}, activity={activity}, interaction={interaction}\n"
         )
         self.output.see("end")
+   
+    def add_edge_dialog(self):
+        """İki düğüm arasında kenar ekler."""
+        if not self.graph or not self.graph.nodes:
+            messagebox.showerror("Hata", "Graf yüklenmemiş.", parent=self)
+            return
+
+        # Mevcut düğüm id'lerini string olarak gösterelim
+        mevcut_ids = ", ".join(str(nid) for nid in sorted(self.graph.nodes.keys()))
+
+        # 1) Kaynak düğüm
+        from_str = simpledialog.askstring(
+            "Kenar Ekle",
+            f"Başlangıç düğüm id'si (mevcutlar: {mevcut_ids}):",
+            parent=self,
+        )
+        if from_str is None:
+            return
+
+        # 2) Hedef düğüm
+        to_str = simpledialog.askstring(
+            "Kenar Ekle",
+            f"Hedef düğüm id'si (mevcutlar: {mevcut_ids}):",
+            parent=self,
+        )
+        if to_str is None:
+            return
+
+        try:
+            from_id = int(from_str)
+            to_id = int(to_str)
+        except ValueError:
+            messagebox.showerror("Hata", "Id'ler tam sayı olmalı.", parent=self)
+            return
+
+        if from_id not in self.graph.nodes or to_id not in self.graph.nodes:
+            messagebox.showerror("Hata", "Girilen id'lerden biri graf içinde yok.", parent=self)
+            return
+
+        # 3) Ağırlık (opsiyonel, boş bırakılırsa 1.0)
+        weight_str = simpledialog.askstring(
+            "Kenar Ekle",
+            "Ağırlık (boş bırakırsan 1.0 kabul edilir):",
+            parent=self,
+        )
+        if not weight_str:
+            weight = 1.0
+        else:
+            try:
+                weight = float(weight_str)
+            except ValueError:
+                messagebox.showerror("Hata", "Ağırlık sayı olmalı.", parent=self)
+                return
+
+        # --- Asıl ekleme işlemi (Graph yapına göre ayarlıyoruz) ---
+        from graph import Edge  # Node gibi Edge sınıfı da graph.py'de olmalı
+
+        # adjacency dict'te listeler yoksa oluştur
+        if from_id not in self.graph.adj:
+            self.graph.adj[from_id] = []
+        if to_id not in self.graph.adj:
+            self.graph.adj[to_id] = []
+
+        # Kenar zaten var mı? (from_id -> to_id için kontrol)
+        for e in self.graph.adj[from_id]:
+            if e.to_id == to_id:
+                messagebox.showerror("Hata", f"{from_id} -> {to_id} kenarı zaten var.", parent=self)
+                return
+
+        # Yönsüz graf gibi düşünerek her iki yöne de ekliyoruz
+        edge1 = Edge(from_id=from_id, to_id=to_id, weight=weight)
+        edge2 = Edge(from_id=to_id, to_id=from_id, weight=weight)
+
+        self.graph.adj[from_id].append(edge1)
+        self.graph.adj[to_id].append(edge2)
+
+        # İstersen edges listesi varsa oraya da ekleyebilirsin:
+        if hasattr(self.graph, "edges"):
+            self.graph.edges.append(edge1)
+            self.graph.edges.append(edge2)
+
+        # Çizimi yenile
+        self.draw_graph()
+
+        # Output'a bilgi yaz
+        self.output.insert(
+            "end",
+            f"\n[Kenar Ekle] {from_id} <-> {to_id} (weight={weight}) eklendi.\n"
+        )
+        self.output.see("end")
+
+    def delete_edge_dialog(self):
+        """İki düğüm arasındaki kenarı siler."""
+        if not self.graph or not self.graph.nodes:
+            messagebox.showerror("Hata", "Graf yüklenmemiş.", parent=self)
+            return
+
+        mevcut_ids = ", ".join(str(nid) for nid in sorted(self.graph.nodes.keys()))
+
+        # 1) Başlangıç düğüm id
+        from_str = simpledialog.askstring(
+            "Kenar Sil",
+            f"Başlangıç düğüm id'si (mevcutlar: {mevcut_ids}):",
+            parent=self,
+        )
+        if from_str is None:
+            return
+
+        # 2) Hedef düğüm id
+        to_str = simpledialog.askstring(
+            "Kenar Sil",
+            f"Hedef düğüm id'si (mevcutlar: {mevcut_ids}):",
+            parent=self,
+        )
+        if to_str is None:
+            return
+
+        try:
+            from_id = int(from_str)
+            to_id = int(to_str)
+        except ValueError:
+            messagebox.showerror("Hata", "Id'ler tam sayı olmalı.", parent=self)
+            return
+
+        if from_id not in self.graph.nodes or to_id not in self.graph.nodes:
+            messagebox.showerror("Hata", "Girilen id'lerden biri graf içinde yok.", parent=self)
+            return
+
+        # --- Kenarı adjacency listesinden sil ---
+        silindi = False
+
+        # from_id listesinden to_id kenarını sil
+        if from_id in self.graph.adj:
+            eski_len = len(self.graph.adj[from_id])
+            self.graph.adj[from_id] = [
+                e for e in self.graph.adj[from_id] if e.to_id != to_id
+            ]
+            if len(self.graph.adj[from_id]) != eski_len:
+                silindi = True
+
+        # Grafı yönsüz gibi düşündüğümüz için tersi yönden de siliyoruz
+        if to_id in self.graph.adj:
+            eski_len = len(self.graph.adj[to_id])
+            self.graph.adj[to_id] = [
+                e for e in self.graph.adj[to_id] if e.to_id != from_id
+            ]
+            if len(self.graph.adj[to_id]) != eski_len:
+                silindi = True
+
+        # Eğer edges listesi varsa, oradan da temizle
+        if hasattr(self.graph, "edges"):
+            self.graph.edges = [
+                e for e in self.graph.edges
+                if not (
+                    (e.from_id == from_id and e.to_id == to_id) or
+                    (e.from_id == to_id and e.to_id == from_id)
+                )
+            ]
+
+        if not silindi:
+            messagebox.showinfo(
+                "Bilgi", f"{from_id} ile {to_id} arasında silinecek kenar bulunamadı.",
+                parent=self
+            )
+            return
+
+        # Çizimi yenile
+        self.draw_graph()
+
+        # Output'a bilgi yaz
+        self.output.insert(
+            "end",
+            f"\n[Kenar Sil] {from_id} <-> {to_id} arasındaki kenar(lar) silindi.\n"
+        )
+        self.output.see("end")
+
 
          
     def on_node_click(self, node_id: int):

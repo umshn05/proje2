@@ -5,7 +5,7 @@
 
 import os
 
-from graph import Graph,Node
+from graph import Graph,Node,Edge
 from dinamik_agirlik import calculate_weight
 from dijkstra import dijkstra_shortest_path
 from astar import astar_shortest_path
@@ -43,15 +43,65 @@ def build_default_graph() -> Graph:
     return g
 
 
-def load_graph() -> Graph:
+
+def load_graph():
     """
-    Önce CSV var mı kontrol eder,
-    varsa CSV'den okur, yoksa yeni graf oluşturur.
+    Uygulama açıldığında kullanılacak hazır graf.
+    1'den 30'a kadar 30 düğüm oluşturur ve basit bağlantılar ekler.
     """
-    if os.path.exists(CSV_PATH):
-        return Graph.from_csv(CSV_PATH, calculate_weight)
-    else:
-        return build_default_graph()
+    g = Graph()
+
+    # --- 30 adet düğüm ekle ---
+    # Buradaki activity / interaction değerlerini istersen değiştirebilirsin.
+    for i in range(1, 31):
+        node = Node(
+            id=i,
+            name=f"Node{i}",
+            activity=0.5,      # hepsine aynı verdim, istersen değiştirirsin
+            interaction=10,    # hepsine 10 etkileşim verdim
+        )
+        g.add_node(node)
+
+       # --- Kenarlar: daha karışık bir yapı ---
+    # Her düğüm; +1, +2 ve +5 komşularına bağlansın (daire etrafında dönen bir yapı)
+    added = set()  # { (küçük_id, büyük_id) } şeklinde tutulacak
+
+    def add_undirected_edge(a, b, w=1.0):
+        """a <-> b kenarını, tekrar etmeyecek şekilde ekler."""
+        key = tuple(sorted((a, b)))
+        if key in added or a == b:
+            return
+        added.add(key)
+
+        # adjacency list yoksa oluştur
+        if a not in g.adj:
+            g.adj[a] = []
+        if b not in g.adj:
+            g.adj[b] = []
+
+        e1 = Edge(from_id=a, to_id=b, weight=w)
+        e2 = Edge(from_id=b, to_id=a, weight=w)
+        g.adj[a].append(e1)
+        g.adj[b].append(e2)
+
+    # 1..30 düğümler için bağlantıları kur
+    for i in range(1, 31):
+        for offset in (1, 2, 5):  # +1, +2, +5 komşuları
+            j = ((i + offset - 1) % 30) + 1  # 30'dan sonra tekrar başa dön
+            add_undirected_edge(i, j, w=1.0)
+
+
+    # Degree'ler backend'de de kabaca doğru olsun
+    for nid, node in g.nodes.items():
+        try:
+            node.degree = len(g.neighbors(nid))
+        except Exception:
+            if nid in g.adj:
+                node.degree = len(g.adj[nid])
+            else:
+                node.degree = 0
+
+    return g
 
 
 
