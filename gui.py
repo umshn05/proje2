@@ -1,13 +1,15 @@
 import tkinter as tk
-from tkinter import ttk, messagebox,simpledialog
+from tkinter import ttk, messagebox, simpledialog, filedialog
 import math
 
+from dinamik_agirlik import calculate_weight
 from main import load_graph  # CSV varsa oradan, yoksa default graf
 from dijkstra import dijkstra_shortest_path
 from astar import astar_shortest_path
 from components import connected_components
 from centrality import top_k_degree_centrality
 from welsh_powell import welsh_powell_coloring
+from graph import Graph, Node, Edge
 
 
 class GraphApp(tk.Tk):
@@ -16,11 +18,11 @@ class GraphApp(tk.Tk):
 
         self.title("Sosyal Ağ Analizi - GUI")
         self.geometry("1200x650")
-        # === Canvas için yardımcı yapılar ===
-        self.node_positions = {}   # node_id -> (x, y)
-        self.node_items = {}       # node_id -> canvas circle id
-        self.edge_items = []       # çizilen kenarların idleri
 
+        # Canvas için yardımcı yapılar
+        self.node_positions = {}   # node_id -> (x, y)
+        self.node_items = {}       # node_id -> canvas oval id
+        self.edge_items = {}       # (a_id, b_id) -> line id
 
         # 1) Grafı backend'den yükle
         try:
@@ -32,8 +34,6 @@ class GraphApp(tk.Tk):
         if not self.graph or not self.graph.nodes:
             messagebox.showerror("Hata", "Graf yüklenemedi veya düğüm yok.")
             return
-        
-        
 
         # 2) Düğüm listesi (id - name)
         self.node_ids = sorted(self.graph.nodes.keys())
@@ -46,24 +46,23 @@ class GraphApp(tk.Tk):
         self._create_widgets()
         self.draw_graph()
 
+    # -------------------------------------------------
+    # NODE SEÇİMİ / COMBOBOX GÜNCELLEME
+    # -------------------------------------------------
     def refresh_node_options(self):
         """Başlangıç / hedef combobox'larının değerlerini günceller."""
         if not self.graph or not self.graph.nodes:
             return
 
-        # id listesi
         self.node_ids = sorted(self.graph.nodes.keys())
-        # Gösterilecek etiketler: '3 - Node3' gibi
         self.node_labels = [
             f"{nid} - {self.graph.nodes[nid].name}"
             for nid in self.node_ids
         ]
 
-        # Combobox'ların isimleri sende farklıysa buna göre düzelt
         self.start_combo["values"] = self.node_labels
         self.goal_combo["values"] = self.node_labels
 
-        # Varsayılan olarak ilkini seçelim (boşsa try/except)
         if self.node_labels:
             try:
                 self.start_combo.current(0)
@@ -71,9 +70,11 @@ class GraphApp(tk.Tk):
             except tk.TclError:
                 pass
 
-
+    # -------------------------------------------------
+    # WIDGET / LAYOUT
+    # -------------------------------------------------
     def _create_widgets(self):
-        # Üst frame: combobox'lar + butonlar
+        # Üst frame: combobox'lar
         top_frame = ttk.Frame(self)
         top_frame.pack(fill="x", padx=10, pady=10)
 
@@ -105,7 +106,7 @@ class GraphApp(tk.Tk):
         )
         self.goal_combo.grid(row=0, column=3, padx=5, pady=5)
 
-        # Butonlar satırı
+        # Algoritma butonları
         button_frame = ttk.Frame(self)
         button_frame.pack(fill="x", padx=10, pady=(0, 10))
 
@@ -139,26 +140,25 @@ class GraphApp(tk.Tk):
         )
         self.clear_btn.grid(row=0, column=5, padx=5, pady=5, sticky="ew")
 
-        # === DÜĞÜM İŞLEMLERİ BUTONLARI ===
+        # Node / Edge işlemleri
         node_frame = ttk.Frame(self)
         node_frame.pack(fill="x", padx=10, pady=(5, 0))
-        #Ekleme
+
         self.btn_add_node = ttk.Button(
             node_frame, text="Düğüm Ekle", command=self.add_node_dialog
         )
         self.btn_add_node.pack(side="left", padx=5)
-        #Silme
+
         self.btn_delete_node = ttk.Button(
             node_frame, text="Düğüm Sil", command=self.delete_node_dialog
         )
         self.btn_delete_node.pack(side="left", padx=5)
-        #Güncelleme
+
         self.btn_update_node = ttk.Button(
             node_frame, text="Düğüm Güncelle", command=self.update_node_dialog
         )
         self.btn_update_node.pack(side="left", padx=5)
-        
-        # === KENAR (EDGE) İŞLEMLERİ ===
+
         self.btn_add_edge = ttk.Button(
             node_frame, text="Kenar Ekle", command=self.add_edge_dialog
         )
@@ -169,30 +169,35 @@ class GraphApp(tk.Tk):
         )
         self.btn_delete_edge.pack(side="left", padx=5)
 
+        # CSV Yükle / Kaydet
+        csv_frame = ttk.Frame(self)
+        csv_frame.pack(fill="x", padx=10, pady=(5, 10))
 
+        self.btn_load_csv = ttk.Button(
+            csv_frame, text="CSV Yükle", command=self.load_csv
+        )
+        self.btn_load_csv.pack(side="left", padx=5)
 
+        self.btn_save_csv = ttk.Button(
+            csv_frame, text="CSV Kaydet", command=self.save_csv
+        )
+        self.btn_save_csv.pack(side="left", padx=5)
 
-
-        # === ANA GÖRÜNÜM: Canvas solda, sonuçlar sağda ===
+        # Ana görünüm: canvas solda, sonuçlar sağda
         main_pane = tk.PanedWindow(self, orient="horizontal")
-        main_pane.pack(fill="both", expand=True, padx=10, pady=(10, 10))
+        main_pane.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        # Sol taraf: canvas
         left_frame = ttk.Frame(main_pane)
-        main_pane.add(left_frame, minsize=450)  # minimum genişlik
+        main_pane.add(left_frame, minsize=450)
 
-        # Sağ taraf: sonuç text alanı
         right_frame = ttk.Frame(main_pane)
         main_pane.add(right_frame, minsize=300)
 
-        # Canvas
         self.canvas = tk.Canvas(left_frame, bg="white")
         self.canvas.pack(fill="both", expand=True)
 
-        # Sonuçların yazıldığı metin alanı
         self.output = tk.Text(right_frame, wrap="word")
         self.output.pack(fill="both", expand=True)
-
 
         # Başlangıçta graf bilgilerini yaz
         self.output.insert("end", "Graf yüklendi.\n\nDüğümler:\n")
@@ -211,6 +216,9 @@ class GraphApp(tk.Tk):
         for nid in sorted(adj):
             self.output.insert("end", f"{nid}: {adj[nid]}\n")
 
+    # -------------------------------------------------
+    # ÇİZİM / HIGHLIGHT
+    # -------------------------------------------------
     def refresh_degrees(self):
         """Adjacency list'e göre tüm düğümlerin degree değerlerini günceller."""
         if not self.graph or not self.graph.nodes:
@@ -221,26 +229,21 @@ class GraphApp(tk.Tk):
                 neighbors = self.graph.neighbors(nid)
                 node.degree = len(neighbors)
             except Exception:
-                # Eğer neighbors fonksiyonu yoksa adjacency'den hesaplarız
                 if nid in self.graph.adj:
                     node.degree = len(self.graph.adj[nid])
                 else:
                     node.degree = 0
-        
-     
+
     def draw_graph(self):
-        """self.graph içindeki node ve edge'leri canvas üzerinde çizer."""
-        # Önce canvas'ı temizle
+        """Grafı canvas üzerinde çizer."""
         self.canvas.delete("all")
         self.node_positions.clear()
         self.node_items.clear()
         self.edge_items.clear()
 
-        # Graf hiç yoksa çık
         if not self.graph or not self.graph.nodes:
             return
 
-        # İstersen degree'leri de burada güncelle
         try:
             self.refresh_degrees()
         except AttributeError:
@@ -251,8 +254,7 @@ class GraphApp(tk.Tk):
         if n == 0:
             return
 
-        # === DÜĞÜM POZİSYONLARI: GRID (TABLO) DÜZENİ ===
-        # Yuvarlak yerine 6 sütunlu bir tabloya yerleştirelim
+        # Düğümleri grid düzeninde yerleştir
         cols = 6
         spacing_x = 120
         spacing_y = 90
@@ -266,10 +268,7 @@ class GraphApp(tk.Tk):
             y = start_y + row * spacing_y
             self.node_positions[node.id] = (x, y)
 
-        # === KENARLARI ÇİZ ===
-        # Burada self.graph.adj yerine adjacency_list() kullanıyoruz.
-        # Böylece backend'de adjacency nasıl tutulursa tutulsun,
-        # komşuluk listesinden çizim yapıyoruz.
+        # Kenarları çiz
         try:
             adj = self.graph.adjacency_list()
         except Exception:
@@ -288,10 +287,10 @@ class GraphApp(tk.Tk):
                 line_id = self.canvas.create_line(
                     x1, y1, x2, y2, width=2, fill="gray"
                 )
-                self.edge_items.append(line_id)
+                self.edge_items[key] = line_id
 
-        # === DÜĞÜMLERİ ÇİZ (OVAL + ID YAZISI) ===
-        r = 20  # düğüm dairesi yarıçapı
+        # Düğümleri (oval + id yazısı) çiz
+        r = 20
         for node in nodes:
             x, y = self.node_positions[node.id]
             oval_id = self.canvas.create_oval(
@@ -300,10 +299,8 @@ class GraphApp(tk.Tk):
             )
             text_id = self.canvas.create_text(x, y, text=str(node.id))
 
-            # Node id -> oval id kaydet
             self.node_items[node.id] = oval_id
 
-            # Tıklama event'i bağla (oval ve text'e)
             self.canvas.tag_bind(
                 oval_id,
                 "<Button-1>",
@@ -315,15 +312,37 @@ class GraphApp(tk.Tk):
                 lambda event, nid=node.id: self.on_node_click(nid)
             )
 
+    def _reset_edge_styles(self):
+        """Tüm kenarları varsayılan görünüme döndür."""
+        for line_id in self.edge_items.values():
+            self.canvas.itemconfig(line_id, fill="gray", width=2)
+
+    def _highlight_path(self, path, color="red"):
+        """Verilen path üzerindeki kenarları renklendir."""
+        if not path or len(path) < 2:
+            return
+
+        self._reset_edge_styles()
+
+        for i in range(len(path) - 1):
+            a = path[i]
+            b = path[i + 1]
+            key = tuple(sorted((a, b)))
+            line_id = self.edge_items.get(key)
+            if line_id:
+                self.canvas.itemconfig(line_id, fill=color, width=4)
+
+    # -------------------------------------------------
+    # DÜĞÜM / KENAR İŞLEMLERİ
+    # -------------------------------------------------
     def add_node_dialog(self):
         """Kullanıcıdan yeni düğüm bilgilerini alıp grafa ekler."""
         if not self.graph:
             messagebox.showerror("Hata", "Graf yüklenmemiş.", parent=self)
             return
 
-        # 1) Id
         id_str = simpledialog.askstring("Düğüm Ekle", "Düğüm id (tam sayı):", parent=self)
-        if id_str is None:  # İptal'e bastı
+        if id_str is None:
             return
         try:
             node_id = int(id_str)
@@ -335,12 +354,10 @@ class GraphApp(tk.Tk):
             messagebox.showerror("Hata", f"{node_id} id'li düğüm zaten var.", parent=self)
             return
 
-        # 2) İsim
         name = simpledialog.askstring("Düğüm Ekle", "İsim:", parent=self)
         if not name:
             name = f"Node{node_id}"
 
-        # 3) Aktiflik
         act_str = simpledialog.askstring(
             "Düğüm Ekle", "Aktiflik (0 ile 1 arası):", parent=self
         )
@@ -354,7 +371,6 @@ class GraphApp(tk.Tk):
             messagebox.showerror("Hata", "Aktiflik 0 ile 1 arasında bir sayı olmalı.", parent=self)
             return
 
-        # 4) Etkileşim
         int_str = simpledialog.askstring(
             "Düğüm Ekle", "Etkileşim sayısı (tam sayı):", parent=self
         )
@@ -366,9 +382,6 @@ class GraphApp(tk.Tk):
             messagebox.showerror("Hata", "Etkileşim tam sayı olmalı.", parent=self)
             return
 
-        # 5) Node'u oluştur ve grafa ekle
-        from graph import Node  # üstte import ettiysen gerekmez ama sorun değil
-
         new_node = Node(id=node_id, name=name, activity=activity, interaction=interaction)
         try:
             self.graph.add_node(new_node)
@@ -376,21 +389,18 @@ class GraphApp(tk.Tk):
             messagebox.showerror("Hata", f"Düğüm eklenirken hata oluştu:\n{e}", parent=self)
             return
 
-        # 6) Combobox'ları ve çizimi güncelle
         self.refresh_node_options()
         self.draw_graph()
 
-        # 7) Output alanına bilgi yaz
         self.output.insert("end", f"\n[Düğüm Ekle] id={node_id}, name={name} eklendi.\n")
         self.output.see("end")
-    
+
     def delete_node_dialog(self):
         """Seçilen bir düğümü graflan siler."""
         if not self.graph or not self.graph.nodes:
             messagebox.showerror("Hata", "Silinecek düğüm yok.", parent=self)
             return
 
-        # Var olan id'leri string olarak gösterelim
         mevcut_ids = ", ".join(str(nid) for nid in sorted(self.graph.nodes.keys()))
         id_str = simpledialog.askstring(
             "Düğüm Sil",
@@ -410,29 +420,21 @@ class GraphApp(tk.Tk):
             messagebox.showerror("Hata", f"{node_id} id'li düğüm bulunamadı.", parent=self)
             return
 
-        # Emin mi diye sor
         if not messagebox.askyesno(
             "Onay", f"{node_id} id'li düğümü ve tüm bağlantılarını silmek istiyor musun?",
             parent=self
         ):
             return
 
-        # --- Asıl silme işlemi (Graph sınıfına göre ayarla) ---
         try:
-            # Eğer Graph içinde remove_node varsa:
             self.graph.remove_node(node_id)
         except AttributeError:
-            # remove_node yoksa: bu basit versiyon: komşuları ve node'u elle sil
-            # 1) Diğer düğümlerin adjacency listesinden çıkar
             for nid, edges in list(self.graph.adj.items()):
                 self.graph.adj[nid] = [e for e in edges if e.to_id != node_id]
-            # 2) Bu düğümün adjacency kaydını sil
             if node_id in self.graph.adj:
                 del self.graph.adj[node_id]
-            # 3) Node kaydını sil
             del self.graph.nodes[node_id]
 
-        # Combobox ve çizimi güncelle
         self.refresh_node_options()
         self.draw_graph()
 
@@ -466,7 +468,6 @@ class GraphApp(tk.Tk):
 
         node = self.graph.nodes[node_id]
 
-        # Mevcut değerleri göstererek güncelleme isteyelim
         name = simpledialog.askstring(
             "Düğüm Güncelle",
             f"İsim (mevcut: {node.name}):",
@@ -506,13 +507,10 @@ class GraphApp(tk.Tk):
             messagebox.showerror("Hata", "Etkileşim tam sayı olmalı.", parent=self)
             return
 
-        # Güncelle
         node.name = name
         node.activity = activity
         node.interaction = interaction
-        # degree'i algoritmaların kendisi zaten kullanıyor, elle değiştirmiyoruz
 
-        # Combobox label'ları ve çizimi güncelle
         self.refresh_node_options()
         self.draw_graph()
 
@@ -522,17 +520,15 @@ class GraphApp(tk.Tk):
             f"name={name}, activity={activity}, interaction={interaction}\n"
         )
         self.output.see("end")
-   
+
     def add_edge_dialog(self):
         """İki düğüm arasında kenar ekler."""
         if not self.graph or not self.graph.nodes:
             messagebox.showerror("Hata", "Graf yüklenmemiş.", parent=self)
             return
 
-        # Mevcut düğüm id'lerini string olarak gösterelim
         mevcut_ids = ", ".join(str(nid) for nid in sorted(self.graph.nodes.keys()))
 
-        # 1) Kaynak düğüm
         from_str = simpledialog.askstring(
             "Kenar Ekle",
             f"Başlangıç düğüm id'si (mevcutlar: {mevcut_ids}):",
@@ -541,7 +537,6 @@ class GraphApp(tk.Tk):
         if from_str is None:
             return
 
-        # 2) Hedef düğüm
         to_str = simpledialog.askstring(
             "Kenar Ekle",
             f"Hedef düğüm id'si (mevcutlar: {mevcut_ids}):",
@@ -561,7 +556,6 @@ class GraphApp(tk.Tk):
             messagebox.showerror("Hata", "Girilen id'lerden biri graf içinde yok.", parent=self)
             return
 
-        # 3) Ağırlık (opsiyonel, boş bırakılırsa 1.0)
         weight_str = simpledialog.askstring(
             "Kenar Ekle",
             "Ağırlık (boş bırakırsan 1.0 kabul edilir):",
@@ -576,37 +570,28 @@ class GraphApp(tk.Tk):
                 messagebox.showerror("Hata", "Ağırlık sayı olmalı.", parent=self)
                 return
 
-        # --- Asıl ekleme işlemi (Graph yapına göre ayarlıyoruz) ---
-        from graph import Edge  # Node gibi Edge sınıfı da graph.py'de olmalı
-
-        # adjacency dict'te listeler yoksa oluştur
         if from_id not in self.graph.adj:
             self.graph.adj[from_id] = []
         if to_id not in self.graph.adj:
             self.graph.adj[to_id] = []
 
-        # Kenar zaten var mı? (from_id -> to_id için kontrol)
         for e in self.graph.adj[from_id]:
             if e.to_id == to_id:
                 messagebox.showerror("Hata", f"{from_id} -> {to_id} kenarı zaten var.", parent=self)
                 return
 
-        # Yönsüz graf gibi düşünerek her iki yöne de ekliyoruz
         edge1 = Edge(from_id=from_id, to_id=to_id, weight=weight)
         edge2 = Edge(from_id=to_id, to_id=from_id, weight=weight)
 
         self.graph.adj[from_id].append(edge1)
         self.graph.adj[to_id].append(edge2)
 
-        # İstersen edges listesi varsa oraya da ekleyebilirsin:
         if hasattr(self.graph, "edges"):
             self.graph.edges.append(edge1)
             self.graph.edges.append(edge2)
 
-        # Çizimi yenile
         self.draw_graph()
 
-        # Output'a bilgi yaz
         self.output.insert(
             "end",
             f"\n[Kenar Ekle] {from_id} <-> {to_id} (weight={weight}) eklendi.\n"
@@ -621,7 +606,6 @@ class GraphApp(tk.Tk):
 
         mevcut_ids = ", ".join(str(nid) for nid in sorted(self.graph.nodes.keys()))
 
-        # 1) Başlangıç düğüm id
         from_str = simpledialog.askstring(
             "Kenar Sil",
             f"Başlangıç düğüm id'si (mevcutlar: {mevcut_ids}):",
@@ -630,7 +614,6 @@ class GraphApp(tk.Tk):
         if from_str is None:
             return
 
-        # 2) Hedef düğüm id
         to_str = simpledialog.askstring(
             "Kenar Sil",
             f"Hedef düğüm id'si (mevcutlar: {mevcut_ids}):",
@@ -650,10 +633,8 @@ class GraphApp(tk.Tk):
             messagebox.showerror("Hata", "Girilen id'lerden biri graf içinde yok.", parent=self)
             return
 
-        # --- Kenarı adjacency listesinden sil ---
         silindi = False
 
-        # from_id listesinden to_id kenarını sil
         if from_id in self.graph.adj:
             eski_len = len(self.graph.adj[from_id])
             self.graph.adj[from_id] = [
@@ -662,7 +643,6 @@ class GraphApp(tk.Tk):
             if len(self.graph.adj[from_id]) != eski_len:
                 silindi = True
 
-        # Grafı yönsüz gibi düşündüğümüz için tersi yönden de siliyoruz
         if to_id in self.graph.adj:
             eski_len = len(self.graph.adj[to_id])
             self.graph.adj[to_id] = [
@@ -671,7 +651,6 @@ class GraphApp(tk.Tk):
             if len(self.graph.adj[to_id]) != eski_len:
                 silindi = True
 
-        # Eğer edges listesi varsa, oradan da temizle
         if hasattr(self.graph, "edges"):
             self.graph.edges = [
                 e for e in self.graph.edges
@@ -688,29 +667,26 @@ class GraphApp(tk.Tk):
             )
             return
 
-        # Çizimi yenile
         self.draw_graph()
 
-        # Output'a bilgi yaz
         self.output.insert(
             "end",
             f"\n[Kenar Sil] {from_id} <-> {to_id} arasındaki kenar(lar) silindi.\n"
         )
         self.output.see("end")
 
-
-         
+    # -------------------------------------------------
+    # NODE TIKLAMA / SEÇİM YARDIMCILAR
+    # -------------------------------------------------
     def on_node_click(self, node_id: int):
         """Canvas üzerinde bir düğüme tıklanınca çalışır."""
         node = self.graph.nodes[node_id]
         neighbors = self.graph.neighbors(node_id)
 
-        # Seçili düğümü görsel olarak biraz vurgulayalım
         for nid, item_id in self.node_items.items():
             width = 3 if nid == node_id else 1
             self.canvas.itemconfig(item_id, width=width)
 
-        # Bilgiyi output alanına yaz
         self.output.insert("end", "\n--- Seçili düğüm ---\n")
         self.output.insert(
             "end",
@@ -721,7 +697,6 @@ class GraphApp(tk.Tk):
         self.output.insert("end", f"Komşuları: {neighbors}\n")
         self.output.see("end")
 
-    # Yardımcı: combobox'lardan seçilen node id'leri al
     def _get_selected_nodes(self):
         if not self.start_var.get() or not self.goal_var.get():
             messagebox.showwarning(
@@ -741,7 +716,9 @@ class GraphApp(tk.Tk):
     def clear_output(self):
         self.output.delete("1.0", "end")
 
-    # Dijkstra butonu
+    # -------------------------------------------------
+    # ALGORİTMA BUTONLARI
+    # -------------------------------------------------
     def run_dijkstra(self):
         start, goal = self._get_selected_nodes()
         if start is None:
@@ -760,7 +737,9 @@ class GraphApp(tk.Tk):
         self.output.insert("end", f"Ziyaret sırası: {result.visited_order}\n")
         self.output.see("end")
 
-    # A* butonu
+        # Yol üzerindeki kenarları KIRMIZI ile vurgula
+        self._highlight_path(result.path, color="red")
+
     def run_astar(self):
         start, goal = self._get_selected_nodes()
         if start is None:
@@ -779,7 +758,9 @@ class GraphApp(tk.Tk):
         self.output.insert("end", f"Ziyaret sırası: {result.visited_order}\n")
         self.output.see("end")
 
-    # Bağlı bileşenler
+        # Yol üzerindeki kenarları YEŞİL ile vurgula
+        self._highlight_path(result.path, color="green")
+
     def show_components(self):
         try:
             comps = connected_components(self.graph)
@@ -795,7 +776,6 @@ class GraphApp(tk.Tk):
             )
         self.output.see("end")
 
-    # Degree centrality (top 5)
     def show_centrality(self):
         try:
             results = top_k_degree_centrality(self.graph, 5)
@@ -813,7 +793,6 @@ class GraphApp(tk.Tk):
             )
         self.output.see("end")
 
-    # Welsh-Powell renkleme
     def show_coloring(self):
         try:
             color_map, table = welsh_powell_coloring(self.graph)
@@ -826,13 +805,94 @@ class GraphApp(tk.Tk):
         for nid in sorted(color_map):
             self.output.insert("end", f"{nid} -> {color_map[nid]}\n")
 
+        # Önce tüm düğümleri varsayılan renge döndür
+        for nid, item_id in self.node_items.items():
+            self.canvas.itemconfig(item_id, fill="#88c4ff")
+
+        # Pastel renk paleti
+        palette = [
+            "#ffd966",
+            "#9fc5f8",
+            "#b6d7a8",
+            "#d5a6bd",
+            "#f4cccc",
+            "#cfe2f3",
+        ]
+
         self.output.insert("end", "\nTablo:\n")
         for r in table:
             self.output.insert(
                 "end",
                 f"- {r.name} (id={r.node_id}) degree={r.degree} -> color {r.color}\n",
             )
+
+            item_id = self.node_items.get(r.node_id)
+            if item_id:
+                color_index = (r.color - 1) % len(palette)
+                self.canvas.itemconfig(item_id, fill=palette[color_index])
+
         self.output.see("end")
+
+    # -------------------------------------------------
+    # CSV İÇE / DIŞA AKTARMA
+    # -------------------------------------------------
+    def load_csv(self):
+        """CSV dosyasından graf yükle."""
+        path = filedialog.askopenfilename(
+            title="CSV Dosyası Seç",
+            filetypes=[("CSV Files", "*.csv"), ("Tüm Dosyalar", "*.*")]
+        )
+        if not path:
+            return
+
+        try:
+            self.graph = Graph.from_csv(path, calculate_weight)
+        except Exception as e:
+            messagebox.showerror("Hata", f"CSV yüklenirken hata oluştu:\n{e}", parent=self)
+            return
+
+        self.refresh_node_options()
+        self.draw_graph()
+
+        self.clear_output()
+        self.output.insert("end", f"[CSV Yükle] {path} dosyasından graf yüklendi.\n\nDüğümler:\n")
+        for nid in sorted(self.graph.nodes.keys()):
+            node = self.graph.nodes[nid]
+            self.output.insert(
+                "end",
+                f"- {nid}: {node.name} "
+                f"(activity={node.activity}, interaction={node.interaction}, degree={node.degree})\n",
+            )
+
+        self.output.insert("end", "\nKomşuluk listesi:\n")
+        adj = self.graph.adjacency_list()
+        for nid in sorted(adj):
+            self.output.insert("end", f"{nid}: {adj[nid]}\n")
+        self.output.see("end")
+
+    def save_csv(self):
+        """Mevcut grafı CSV olarak kaydet."""
+        if not self.graph or not self.graph.nodes:
+            messagebox.showerror("Hata", "Kaydedilecek graf bulunamadı.", parent=self)
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="CSV Kaydet",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv"), ("Tüm Dosyalar", "*.*")]
+        )
+        if not path:
+            return
+
+        try:
+            self.graph.to_csv(path)
+        except Exception as e:
+            messagebox.showerror("Hata", f"CSV kaydedilirken hata oluştu:\n{e}", parent=self)
+            return
+
+        self.output.insert("end", f"\n[CSV Kaydet] Graf {path} dosyasına kaydedildi.\n")
+        self.output.see("end")
+        messagebox.showinfo("Bilgi", f"Graf CSV olarak kaydedildi:\n{path}", parent=self)
 
 
 if __name__ == "__main__":
