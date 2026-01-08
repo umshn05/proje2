@@ -96,6 +96,11 @@ Minimum renk sayısı sağlandı
 
 Uygulama Python OOP yapısı ile geliştirilmiştir.
 
+```mermaid
+BURAYA DİYAGRAM KODU
+
+
+
 classDiagram
 class Node{
   +id
@@ -135,6 +140,8 @@ Graph --> Node
 Graph --> Edge
 Graph --> Algorithms
 Graph --> Coloring
+
+```
 
 5️⃣ Uygulama – Ekran Görüntüleri, Testler ve Sonuçlar
 
